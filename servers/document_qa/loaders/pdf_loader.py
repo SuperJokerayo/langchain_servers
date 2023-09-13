@@ -7,13 +7,9 @@ from unstructured.partition.text import partition_text
 from langchain.document_loaders.unstructured import UnstructuredFileLoader
 
 class PDFLoader(UnstructuredFileLoader):
-    def __init__(self, pdf_path):
-        super().__init__(file_path = pdf_path)
-        self.pdf_path = pdf_path
-
     # extractor text and imgs in pdf
     def _get_elements(self):
-        doc = fitz.open(self.pdf_path)
+        doc = fitz.open(self.file_path)
         response = ""
         ocr = RapidOCR()
 
@@ -34,6 +30,6 @@ class PDFLoader(UnstructuredFileLoader):
         return partition_text(text = response, **self.unstructured_kwargs)
 
 if __name__ == "__main__":
-    loader = PDFLoader(pdf_path = "../../../assets/test.pdf")
+    loader = PDFLoader(file_path = "../../../assets/test.pdf")
     text = loader.load()
     print(text)
