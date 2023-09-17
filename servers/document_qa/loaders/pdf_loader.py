@@ -1,35 +1,85 @@
-import fitz
+from __future__ import annotations
+
+from typing import Optional, Mapping, Any, Iterator
+
+import os
+
+from ..document import Document
+
+try:
+    import fitz
+except ImportError:
+    raise ImportError(
+        "`fitz` package not found, please install it with "
+        "`pip install PyMuPDF`"
+    )
+
 import numpy as np
 
-from rapidocr_onnxruntime import RapidOCR
-from unstructured.partition.text import partition_text
+class PDFLoader():
+    """
+    use PyMuPDF as base loader
+    """
+    def __init__(
+        self, 
+        file_path: str, 
+        extract_images: bool = False, 
+        text_kwargs: Optional[Mapping[str, Any]] = None
+    ) -> None:
+        if not os.path.exists(file_path):
+            raise "No such file exists!"
+        if len(file_path) < 4 or file_path[-4:] != ".pdf":
+            raise "Not a correct PDF file!"
+        
+        self.file_path = file_path
+        self.extract_images = extract_images
+        self.text_kwargs = text_kwargs or {}
 
-from langchain.document_loaders.unstructured import UnstructuredFileLoader
-
-class PDFLoader(UnstructuredFileLoader):
-    # extractor text and imgs in pdf
-    def _get_elements(self):
+    def load(self) -> Iterator[Document]:
         doc = fitz.open(self.file_path)
-        response = ""
-        ocr = RapidOCR()
+
+        pdf_content = []
 
         for page in doc:
-            text = page.get_text()
-            response += text + "\n"
+            page_content = page.get_text(**self.text_kwargs)
 
-            imgs = page.get_images()
+            if self.extract_images:
+                page_content += self._extract_images_from_page(doc, page)
 
-            for img in imgs:
-                pix = fitz.Pixmap(doc, img[0])
-                img_array = np.frombuffer(pix.samples, dtype = np.uint8).reshape(pix.height, pix.width, -1)
-                result, _ = ocr(img_array)
+            metadata = doc.metadata
+            metadata["page"] = page.number
+            metadata["total_pages"] = len(doc)
 
-                if result:
-                    ocr_result = [line[1] for line in result]
-                    response += "\n".join(ocr_result)
-        return partition_text(text = response, **self.unstructured_kwargs)
+            pdf_content.append(
+                Document(
+                    content = page_content,
+                    metadata = metadata
+                )
+            )
+        return pdf_content
 
-if __name__ == "__main__":
-    loader = PDFLoader(file_path = "../../../assets/test.pdf")
-    text = loader.load()
-    print(text)
+    def _extract_images_from_page(
+        self, 
+        doc:fitz.fitz.Document, 
+        page: fitz.fitz.Page
+    ) -> str:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            ocr = RapidOCR()
+        except ImportError:
+            raise ImportError(
+                "`rapidocr-onnxruntime` package not found, please install it with "
+                "`pip install rapidocr-onnxruntime`"
+            )
+        text = ""
+        img_list = page.get_images()
+        for img in img_list:
+            xref = img[0]
+            pix = fitz.Pixmap(doc, xref)
+            img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, -1)
+            result, _ = ocr(img_array)
+
+            if result:
+                result = [r[1] for r in result]
+                text += "\n".join(result)
+        return text
